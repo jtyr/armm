@@ -1,0 +1,247 @@
+#!/usr/bin/env python
+
+"""
+Android Repo Manifest Management tool.
+
+Usage:
+  armm init [options]
+  armm set [options] notice <value>
+  armm set [options] default (<key> <value>)...
+  armm set [options] extend-project (<key> <value>)...
+  armm set [options] include (<key> <value>)...
+  armm set [options] manifest-server (<key> <value>)...
+  armm set [options] project (<key> <value>)...
+  armm set [options] remote (<key> <value>)...
+  armm set [options] remove-project (<key> <value>)...
+  armm set [options] repo-hoops (<key> <value>)...
+  armm pset [options] <project> annotation (<key> <value>)...
+  armm pset [options] <project> copyfile (<key> <value>)...
+  armm pset [options] <project> linkfile (<key> <value>)...
+  armm pset [options] <project> project (<key> <value>)...
+  armm remove [options] manifest-server
+  armm remove [options] notice
+  armm remove [options] repo-hoops
+  armm remove [options] default [<key>]...
+  armm remove [options] include <name>
+  armm remove [options] remove-project <name>
+  armm remove [options] extend-project <name> [<key>]...
+  armm remove [options] project <name> [<key>]...
+  armm remove [options] remote <name> [<key>]...
+  armm premove [options] <project> copyfile <dest>
+  armm premove [options] <project> linkfile <dest>
+  armm premove [options] <project> annotation <name> [<key>]...
+  armm premove [options] <project> project <name> [<key>]...
+  armm list [options] default
+  armm list [options] manifest-server
+  armm list [options] notice
+  armm list [options] repo-hoops
+  armm list [options] extend-project [<key> <value>]...
+  armm list [options] include [<key> <value>]...
+  armm list [options] project [<key> <value>]...
+  armm list [options] remote [<key> <value>]...
+  armm list [options] remove-project [<key> <value>]...
+  armm plist [options] <project> annotation [<key> <value>]...
+  armm plist [options] <project> copyfile [<key> <value>]...
+  armm plist [options] <project> linkfile [<key> <value>]...
+  armm plist [options] <project> project [<key> <value>]...
+  armm -h | --help
+  armm --version
+
+Init options:
+  -F --force             Initiate new file even if the file already exists.
+
+List options:
+  -o TYPE --output=TYPE  Output type (plain|json|yaml) [default: plain].
+  -n --not-pretty        Disable pretty formatting for JSON and YAML output.
+  -a ATTR --attr=ATTR    Print only content of the specified attribute.
+
+Common options:
+  -f FILE --file=FILE    Manifest filename [default: default.xml].
+  -v --verbose           Show verbose output.
+  -h --help              Show this screen.
+  --version              Show version.
+"""
+
+try:
+    from docopt import docopt
+    HAS_DOCOPT = True
+except ImportError:
+    HAS_DOCOPT = False
+
+from armm import AndroidRepoManifest
+from armm import REQUIRED
+from armm import TEXT_ONLY
+import json
+import logging
+import sys
+
+try:
+    import yaml
+    HAS_YAML = True
+except ImportError:
+    HAS_YAML = False
+
+
+def main():
+    # Read commandline arguments
+    args = docopt(__doc__, version='1.0')
+
+    # Get logger
+    log = logging.getLogger(__name__)
+
+    # Configure logging
+    level = logging.WARNING
+
+    if args['--verbose']:
+        level = logging.DEBUG
+
+    logging.basicConfig(format='%(levelname)s: %(message)s', level=level)
+
+    # Make an instance of the management object
+    arm = AndroidRepoManifest(filename=args['--file'], log=log)
+
+    # Decide what to do
+    if args['init']:
+        arm.init(args['--force'])
+        arm.save()
+    elif args['set'] or args['pset']:
+        # Determine which element to process
+        for element in REQUIRED.keys():
+            if args[element]:
+                break
+        else:
+            log.error("Cannot find required key.")
+            sys.exit(1)
+
+        if element in TEXT_ONLY:
+            args['<key>'] = ['text']
+
+        # Do XML stuff
+        arm.load()
+
+        if args['set']:
+            arm.set(
+                element=element,
+                attrs=dict(zip(args['<key>'], args['<value>'])))
+        else:
+            arm.pset(
+                project=args['<project>'],
+                element=element,
+                attrs=dict(zip(args['<key>'], args['<value>'])))
+
+        arm.save()
+    elif args['remove'] or args['premove']:
+        # Determine which element to process
+        for element in REQUIRED.keys():
+            if args[element]:
+                break
+        else:
+            log.error("Cannot find required key.")
+            sys.exit(1)
+
+        # Fake the <name> for the copyfile/linkfile elements
+        if element in ['copyfile', 'linkfile']:
+            args['<name>'] = args['<dest>']
+
+        # Do XML stuff
+        arm.load()
+
+        if args['remove']:
+            arm.remove(
+                element=element,
+                attrs=args['<key>'],
+                name=args['<name>'])
+        else:
+            arm.premove(
+                project=args['<project>'],
+                element=element,
+                attrs=args['<key>'],
+                name=args['<name>'])
+
+        arm.save()
+    elif args['list'] or args['plist']:
+        # Determine which element to process
+        for element in REQUIRED.keys():
+            if args[element]:
+                break
+        else:
+            log.error("Cannot find required key.")
+            sys.exit(1)
+
+        # Do XML stuff
+        arm.load()
+        if args['list']:
+            lst = arm.list(
+                element=element,
+                key=args['<key>'],
+                value=args['<value>'],
+                attr=args['--attr'])
+        else:
+            lst = arm.plist(
+                project=args['<project>'],
+                element=element,
+                key=args['<key>'],
+                value=args['<value>'],
+                attr=args['--attr'])
+
+        # Format output
+        if args['--output'] == 'plain':
+            for item in lst:
+                if args['--attr'] is not None:
+                    print(item)
+                    continue
+
+                fields = [item['element']]
+
+                if item['attrs'] is None:
+                    fields.append('')
+                else:
+                    kv_list = [
+                        "%s=%s" % (k, repr(v))
+                        for k, v in sorted(item['attrs'].items())]
+
+                    if len(kv_list):
+                        fields.append(" %s" % ' '.join(kv_list))
+                    else:
+                        fields.append('')
+
+                if item['text'] is None:
+                    fields.append('')
+                else:
+                    fields.append(" %s" % repr(item['text']))
+
+                print("%s%s%s" % tuple(fields))
+        elif args['--output'] == 'yaml':
+            if HAS_YAML:
+                yaml_args = {
+                    'default_flow_style': False
+                }
+
+                if args['--not-pretty']:
+                    yaml_args = {}
+
+                print(yaml.dump(lst, **yaml_args))
+            else:
+                log.error("The yaml Python module is not installed.")
+                sys.exit(1)
+        elif args['--output'] == 'json':
+            json_args = {
+                'sort_keys': True,
+                'indent': 2
+            }
+
+            if args['--not-pretty']:
+                json_args = {}
+
+            print(json.dumps(lst, **json_args))
+        else:
+            log.error("Unsupported output format %s." % args['--output'])
+            sys.exit(1)
+
+
+if __name__ == '__main__':
+    if not HAS_DOCOPT:
+        print("ERROR: The docopt Python module is not installed.")
+        sys.exit(1)
+
+    main()
