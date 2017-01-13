@@ -119,7 +119,7 @@ class AndroidRepoManifest():
                 el_key = MULTI_KEY[element]
 
                 # Check if element with the same key already exists
-                if el.get(el_key) == attrs[el_key]:
+                if el_key in attrs and el.get(el_key) == attrs[el_key]:
                     for key, value in attrs.items():
                         el.set(key, value)
 
